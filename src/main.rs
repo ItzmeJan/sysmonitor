@@ -15,8 +15,8 @@ use windows::{
 };
 
 // Configuration constants
-const ACTIVITY_RETENTION_HOURS: u64 = 24; // Keep activity data for 24 hours
-const MAX_RECENT_ACTIVITIES: usize = 50; // Maximum number of recent activities to show
+const ACTIVITY_RETENTION_HOURS: u64 = 24; // Keep activity data for 24 hours (1 day)
+const MAX_RECENT_ACTIVITIES: usize = 1000; // Show all activities (effectively unlimited)
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UsageEntry {
