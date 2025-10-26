@@ -14,6 +14,10 @@ use windows::{
     Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId},
 };
 
+// Configuration constants
+const ACTIVITY_RETENTION_HOURS: u64 = 24; // Keep activity data for 24 hours
+const MAX_RECENT_ACTIVITIES: usize = 50; // Maximum number of recent activities to show
+
 #[derive(Debug, Clone, Serialize, Deserialize)]
 struct UsageEntry {
     identifier: String,
@@ -297,30 +301,31 @@ impl SystemMonitor {
     }
 
     fn get_recent_activity(&self) -> Vec<RecentActivity> {
+        // Get recent activity from the last 24 hours (configurable retention period)
         let conn = match Connection::open(&self.db_path) {
             Ok(conn) => conn,
             Err(_) => return Vec::new(),
         };
 
         let mut stmt = match conn.prepare(
-            "SELECT identifier, app_name, window_title, url, duration, timestamp 
+            &format!("SELECT identifier, app_name, window_title, url, duration, timestamp 
              FROM usage_logs 
              WHERE timestamp >= ?1 
              ORDER BY timestamp DESC 
-             LIMIT 10"
+             LIMIT {}", MAX_RECENT_ACTIVITIES)
         ) {
             Ok(stmt) => stmt,
             Err(_) => return Vec::new(),
         };
 
-        // Get today's start timestamp (00:00:00 today)
+        // Get retention period ago timestamp (persistent for configured hours)
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
             .as_secs();
-        let today_start = current_time - (current_time % 86400); // 86400 seconds in a day
+        let retention_cutoff = current_time - (ACTIVITY_RETENTION_HOURS * 3600); // Convert hours to seconds
 
-        let rows = match stmt.query_map([today_start as i64], |row| {
+        let rows = match stmt.query_map([retention_cutoff as i64], |row| {
             Ok(RecentActivity {
                 identifier: row.get::<_, String>(0)?,
                 app_name: row.get::<_, String>(1)?,

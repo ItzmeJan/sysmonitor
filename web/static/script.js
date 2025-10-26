@@ -100,58 +100,92 @@ class SystemMonitorDashboard {
             return;
         }
 
-        // Group activities by app name + title/URL combination
-        const groupedActivities = this.groupActivitiesByAppAndTitle(recentActivity);
+        // Group activities by browser first, then by site within each browser
+        const groupedActivities = this.groupActivitiesByBrowserAndSite(recentActivity);
 
-        container.innerHTML = groupedActivities.map(group => {
-            const totalDuration = group.activities.reduce((sum, activity) => sum + activity.duration, 0);
-            const latestActivity = group.activities[0]; // Most recent
+        container.innerHTML = groupedActivities.map(browserGroup => {
+            const browserTotalTime = browserGroup.total_duration;
+            const latestActivity = browserGroup.latest_activity;
             const timeAgo = this.formatTimeAgo(latestActivity.timestamp);
             
-            // Show the title/URL
-            const title = latestActivity.url || latestActivity.window_title;
+            // Create individual site entries
+            const siteEntries = browserGroup.sites.map(site => {
+                return `
+                    <div class="site-entry">
+                        <div class="site-name">${this.escapeHtml(site.site_name)}</div>
+                        <div class="site-duration">${this.formatDuration(site.duration)}</div>
+                    </div>
+                `;
+            }).join('');
             
             return `
-                <div class="activity-entry">
-                    <div class="activity-info">
-                        <div class="activity-app">${this.escapeHtml(group.app_name)}</div>
-                        <div class="activity-details">${this.escapeHtml(title)}</div>
+                <div class="browser-group">
+                    <div class="browser-header">
+                        <div class="browser-info">
+                            <div class="browser-name">${this.escapeHtml(browserGroup.app_name)}</div>
+                            <div class="browser-sites">${browserGroup.sites.length} sites</div>
+                        </div>
+                        <div class="browser-time">
+                            <div class="browser-duration">${this.formatDuration(browserTotalTime)}</div>
+                            <div class="browser-time-ago">${timeAgo}</div>
+                        </div>
                     </div>
-                    <div class="activity-time">
-                        <div class="duration">${this.formatDuration(totalDuration)}</div>
-                        <div class="time-ago">${timeAgo}</div>
+                    <div class="sites-list">
+                        ${siteEntries}
                     </div>
                 </div>
             `;
         }).join('');
     }
 
-    groupActivitiesByAppAndTitle(activities) {
-        const groups = new Map();
+    groupActivitiesByBrowserAndSite(activities) {
+        const browserGroups = new Map();
         
+        // First, group by browser
         activities.forEach(activity => {
-            const title = activity.url || activity.window_title;
-            const groupKey = `${activity.app_name}|||${title}`; // Use separator to avoid conflicts
+            const appName = activity.app_name;
             
-            if (!groups.has(groupKey)) {
-                groups.set(groupKey, {
-                    app_name: activity.app_name,
-                    title: title,
-                    activities: []
+            if (!browserGroups.has(appName)) {
+                browserGroups.set(appName, {
+                    app_name: appName,
+                    total_duration: 0,
+                    latest_activity: activity,
+                    sites: new Map()
                 });
             }
-            groups.get(groupKey).activities.push(activity);
+            
+            const browserGroup = browserGroups.get(appName);
+            browserGroup.total_duration += activity.duration;
+            
+            // Keep track of the most recent activity for this browser
+            if (activity.timestamp > browserGroup.latest_activity.timestamp) {
+                browserGroup.latest_activity = activity;
+            }
+            
+            // Group sites within this browser
+            const siteName = activity.url || activity.window_title;
+            if (!browserGroup.sites.has(siteName)) {
+                browserGroup.sites.set(siteName, {
+                    site_name: siteName,
+                    duration: 0
+                });
+            }
+            browserGroup.sites.get(siteName).duration += activity.duration;
         });
-
-        // Sort activities within each group by timestamp (most recent first)
-        groups.forEach(group => {
-            group.activities.sort((a, b) => b.timestamp - a.timestamp);
-        });
-
-        // Convert to array and sort groups by most recent activity
-        return Array.from(groups.values()).sort((a, b) => 
-            b.activities[0].timestamp - a.activities[0].timestamp
-        );
+        
+        // Convert to array format and sort
+        return Array.from(browserGroups.values()).map(browserGroup => {
+            // Convert sites Map to array and sort by duration (highest first)
+            const sitesArray = Array.from(browserGroup.sites.values())
+                .sort((a, b) => b.duration - a.duration);
+            
+            return {
+                app_name: browserGroup.app_name,
+                total_duration: browserGroup.total_duration,
+                latest_activity: browserGroup.latest_activity,
+                sites: sitesArray
+            };
+        }).sort((a, b) => b.latest_activity.timestamp - a.latest_activity.timestamp);
     }
 
     groupActivitiesByApp(activities) {

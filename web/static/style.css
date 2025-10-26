@@ -125,6 +125,8 @@ body {
     box-shadow: 0 8px 32px var(--shadow-color);
     overflow: hidden;
     transition: transform 0.3s ease, box-shadow 0.3s ease, background 0.3s ease;
+    display: flex;
+    flex-direction: column;
 }
 
 .card:hover {
@@ -150,6 +152,10 @@ body {
 
 .card-content {
     padding: 20px;
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    min-height: 0;
 }
 
 /* Current Activity */
@@ -251,6 +257,9 @@ body {
 .activity-list {
     max-height: 400px;
     overflow-y: auto;
+    overflow-x: hidden;
+    position: relative;
+    contain: layout style;
 }
 
 .activity-entry {
@@ -305,6 +314,100 @@ body {
 .activity-time .time-ago {
     font-size: 0.7rem;
     color: var(--text-light);
+}
+
+/* Browser Group Styling */
+.browser-group {
+    margin-bottom: 15px;
+    border: 1px solid var(--border-color);
+    border-radius: 8px;
+    overflow: hidden;
+    transition: border-color 0.3s ease;
+    position: relative;
+}
+
+.browser-header {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 12px 15px;
+    background: var(--bg-secondary);
+    border-bottom: 1px solid var(--border-color);
+}
+
+.browser-info {
+    flex: 1;
+}
+
+.browser-name {
+    font-weight: 600;
+    color: var(--text-primary);
+    font-size: 1rem;
+    margin-bottom: 2px;
+}
+
+.browser-sites {
+    font-size: 0.8rem;
+    color: var(--text-muted);
+}
+
+.browser-time {
+    text-align: right;
+    min-width: 80px;
+}
+
+.browser-duration {
+    font-weight: 600;
+    color: var(--accent-color);
+    font-size: 1rem;
+    margin-bottom: 2px;
+}
+
+.browser-time-ago {
+    font-size: 0.7rem;
+    color: var(--text-light);
+}
+
+.sites-list {
+    background: var(--bg-card);
+    max-height: none;
+    overflow: visible;
+}
+
+.site-entry {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    padding: 8px 20px;
+    border-bottom: 1px solid var(--border-color);
+    transition: background 0.2s ease;
+}
+
+.site-entry:last-child {
+    border-bottom: none;
+}
+
+.site-entry:hover {
+    background: rgba(0, 0, 0, 0.02);
+}
+
+[data-theme="dark"] .site-entry:hover {
+    background: rgba(255, 255, 255, 0.02);
+}
+
+.site-name {
+    font-size: 0.9rem;
+    color: var(--text-secondary);
+    flex: 1;
+    margin-right: 15px;
+    word-break: break-word;
+}
+
+.site-duration {
+    font-size: 0.8rem;
+    color: var(--accent-color);
+    font-weight: 600;
+    white-space: nowrap;
 }
 
 /* No Data State */
