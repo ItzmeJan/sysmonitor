@@ -100,23 +100,84 @@ class SystemMonitorDashboard {
             return;
         }
 
-        container.innerHTML = recentActivity.map(activity => {
-            const timeAgo = this.formatTimeAgo(activity.timestamp);
-            const details = activity.url || activity.window_title;
+        // Group activities by app name, but show individual titles
+        const groupedActivities = this.groupActivitiesByAppWithTitles(recentActivity);
+
+        container.innerHTML = groupedActivities.map(group => {
+            const totalDuration = group.activities.reduce((sum, activity) => sum + activity.duration, 0);
+            const latestActivity = group.activities[0]; // Most recent
+            const timeAgo = this.formatTimeAgo(latestActivity.timestamp);
+            
+            // Show individual titles for each session
+            const titleDetails = group.activities.map(activity => {
+                const title = activity.url || activity.window_title;
+                const duration = this.formatDuration(activity.duration);
+                return `${this.escapeHtml(title)} (${duration})`;
+            }).join('<br>');
             
             return `
                 <div class="activity-entry">
                     <div class="activity-info">
-                        <div class="activity-app">${this.escapeHtml(activity.app_name)}</div>
-                        <div class="activity-details">${this.escapeHtml(details)}</div>
+                        <div class="activity-app">${this.escapeHtml(group.app_name)}</div>
+                        <div class="activity-details">${titleDetails}</div>
                     </div>
                     <div class="activity-time">
-                        <div class="duration">${this.formatDuration(activity.duration)}</div>
+                        <div class="duration">${this.formatDuration(totalDuration)}</div>
                         <div class="time-ago">${timeAgo}</div>
                     </div>
                 </div>
             `;
         }).join('');
+    }
+
+    groupActivitiesByAppWithTitles(activities) {
+        const groups = new Map();
+        
+        activities.forEach(activity => {
+            const appName = activity.app_name;
+            if (!groups.has(appName)) {
+                groups.set(appName, {
+                    app_name: appName,
+                    activities: []
+                });
+            }
+            groups.get(appName).activities.push(activity);
+        });
+
+        // Sort activities within each group by timestamp (most recent first)
+        groups.forEach(group => {
+            group.activities.sort((a, b) => b.timestamp - a.timestamp);
+        });
+
+        // Convert to array and sort groups by most recent activity
+        return Array.from(groups.values()).sort((a, b) => 
+            b.activities[0].timestamp - a.activities[0].timestamp
+        );
+    }
+
+    groupActivitiesByApp(activities) {
+        const groups = new Map();
+        
+        activities.forEach(activity => {
+            const appName = activity.app_name;
+            if (!groups.has(appName)) {
+                groups.set(appName, {
+                    app_name: appName,
+                    activities: []
+                });
+            }
+            groups.get(appName).activities.push(activity);
+        });
+
+        // Sort activities within each group by timestamp (most recent first)
+        groups.forEach(group => {
+            group.activities.sort((a, b) => b.timestamp - a.timestamp);
+        });
+
+        // Convert to array and sort groups by most recent activity
+        return Array.from(groups.values()).sort((a, b) => 
+            b.activities[0].timestamp - a.activities[0].timestamp
+        );
     }
 
     formatDuration(seconds) {
@@ -125,10 +186,16 @@ class SystemMonitorDashboard {
         } else if (seconds < 3600) {
             const minutes = Math.floor(seconds / 60);
             const remainingSeconds = seconds % 60;
+            if (remainingSeconds === 0) {
+                return `${minutes}m`;
+            }
             return `${minutes}m ${remainingSeconds}s`;
         } else {
             const hours = Math.floor(seconds / 3600);
             const minutes = Math.floor((seconds % 3600) / 60);
+            if (minutes === 0) {
+                return `${hours}h`;
+            }
             return `${hours}h ${minutes}m`;
         }
     }
