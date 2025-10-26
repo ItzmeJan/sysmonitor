@@ -288,6 +288,18 @@ body {
     font-size: 0.8rem;
     white-space: nowrap;
     transition: color 0.3s ease;
+    text-align: right;
+}
+
+.activity-time .duration {
+    font-weight: 600;
+    color: var(--accent-color);
+    margin-bottom: 2px;
+}
+
+.activity-time .time-ago {
+    font-size: 0.7rem;
+    color: var(--text-light);
 }
 
 /* No Data State */

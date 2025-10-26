@@ -39,11 +39,22 @@ struct ApiResponse {
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
+struct RecentActivity {
+    identifier: String,
+    app_name: String,
+    window_title: String,
+    url: Option<String>,
+    duration: u64,
+    timestamp: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
 struct DashboardData {
     current_app: Option<String>,
     current_window: Option<String>,
     current_url: Option<String>,
     active_apps: Vec<(String, u64)>,
+    recent_activity: Vec<RecentActivity>,
     total_apps: usize,
     uptime: u64,
 }
@@ -254,14 +265,25 @@ impl SystemMonitor {
                 let duration = current_time.saturating_sub(entry.start_time);
                 
                 if duration > 0 {
+                    // Extract app name and window title from identifier
+                    let (app_name, window_title, url) = if let Some((app, rest)) = identifier.split_once(':') {
+                        if rest.starts_with("http") {
+                            (app.to_string(), rest.to_string(), Some(rest.to_string()))
+                        } else {
+                            (app.to_string(), rest.to_string(), None)
+                        }
+                    } else {
+                        (identifier.clone(), "Unknown".to_string(), None)
+                    };
+
                     tx.execute(
                         "INSERT INTO usage_logs (identifier, app_name, window_title, url, timestamp, duration) 
                          VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
                         params![
                             identifier,
-                            "Unknown", // We'll need to store this separately
-                            "Unknown", // We'll need to store this separately
-                            "",
+                            app_name,
+                            window_title,
+                            url.unwrap_or_default(),
                             current_time,
                             duration
                         ],
@@ -272,6 +294,53 @@ impl SystemMonitor {
         
         tx.commit()?;
         Ok(())
+    }
+
+    fn get_recent_activity(&self) -> Vec<RecentActivity> {
+        let conn = match Connection::open(&self.db_path) {
+            Ok(conn) => conn,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut stmt = match conn.prepare(
+            "SELECT identifier, app_name, window_title, url, duration, timestamp 
+             FROM usage_logs 
+             WHERE timestamp >= ?1 
+             ORDER BY timestamp DESC 
+             LIMIT 10"
+        ) {
+            Ok(stmt) => stmt,
+            Err(_) => return Vec::new(),
+        };
+
+        // Get today's start timestamp (00:00:00 today)
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+        let today_start = current_time - (current_time % 86400); // 86400 seconds in a day
+
+        let rows = match stmt.query_map([today_start as i64], |row| {
+            Ok(RecentActivity {
+                identifier: row.get::<_, String>(0)?,
+                app_name: row.get::<_, String>(1)?,
+                window_title: row.get::<_, String>(2)?,
+                url: row.get::<_, Option<String>>(3)?,
+                duration: row.get::<_, i64>(4)? as u64,
+                timestamp: row.get::<_, i64>(5)? as u64,
+            })
+        }) {
+            Ok(rows) => rows,
+            Err(_) => return Vec::new(),
+        };
+
+        let mut activities = Vec::new();
+        for row in rows {
+            if let Ok(activity) = row {
+                activities.push(activity);
+            }
+        }
+        activities
     }
 
     fn get_dashboard_data(&self) -> DashboardData {
@@ -307,11 +376,15 @@ impl SystemMonitor {
         // Sort by duration (most recent first)
         active_apps.sort_by(|a, b| b.1.cmp(&a.1));
 
+        // Get recent activity from database
+        let recent_activity = self.get_recent_activity();
+
         DashboardData {
             current_app,
             current_window,
             current_url,
             active_apps,
+            recent_activity,
             total_apps: usage_data.len(),
             uptime: current_time - self.start_time,
         }

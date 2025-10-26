@@ -55,7 +55,7 @@ class SystemMonitorDashboard {
         this.updateActiveAppsList(data.active_apps);
 
         // Update recent activity (using active apps as recent activity for now)
-        this.updateRecentActivity(data.active_apps);
+        this.updateRecentActivity(data.recent_activity);
 
         this.updateLastUpdatedTime();
     }
@@ -92,29 +92,28 @@ class SystemMonitorDashboard {
         }).join('');
     }
 
-    updateRecentActivity(activeApps) {
+    updateRecentActivity(recentActivity) {
         const container = document.getElementById('recent-activity-list');
         
-        if (activeApps.length === 0) {
+        if (recentActivity.length === 0) {
             container.innerHTML = '<div class="no-data">No recent activity</div>';
             return;
         }
 
-        // Show last 5 activities
-        const recentApps = activeApps.slice(0, 5);
-        
-        container.innerHTML = recentApps.map(app => {
-            const [identifier, duration] = app;
-            const [appName, ...rest] = identifier.split(':');
-            const details = rest.join(':');
+        container.innerHTML = recentActivity.map(activity => {
+            const timeAgo = this.formatTimeAgo(activity.timestamp);
+            const details = activity.url || activity.window_title;
             
             return `
                 <div class="activity-entry">
                     <div class="activity-info">
-                        <div class="activity-app">${this.escapeHtml(appName)}</div>
+                        <div class="activity-app">${this.escapeHtml(activity.app_name)}</div>
                         <div class="activity-details">${this.escapeHtml(details)}</div>
                     </div>
-                    <div class="activity-time">${this.formatDuration(duration)}</div>
+                    <div class="activity-time">
+                        <div class="duration">${this.formatDuration(activity.duration)}</div>
+                        <div class="time-ago">${timeAgo}</div>
+                    </div>
                 </div>
             `;
         }).join('');
@@ -131,6 +130,24 @@ class SystemMonitorDashboard {
             const hours = Math.floor(seconds / 3600);
             const minutes = Math.floor((seconds % 3600) / 60);
             return `${hours}h ${minutes}m`;
+        }
+    }
+
+    formatTimeAgo(timestamp) {
+        const now = Math.floor(Date.now() / 1000);
+        const diff = now - timestamp;
+        
+        if (diff < 60) {
+            return 'Just now';
+        } else if (diff < 3600) {
+            const minutes = Math.floor(diff / 60);
+            return `${minutes}m ago`;
+        } else if (diff < 86400) {
+            const hours = Math.floor(diff / 3600);
+            return `${hours}h ago`;
+        } else {
+            const days = Math.floor(diff / 86400);
+            return `${days}d ago`;
         }
     }
 
