@@ -28,6 +28,7 @@ struct UsageEntry {
 struct ActiveEntry {
     status: bool,
     last_seen: u64,
+    start_time: u64, // When this app first became active
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize)]
@@ -95,6 +96,7 @@ impl SystemMonitor {
             usage_data.insert(identifier, ActiveEntry {
                 status: false,
                 last_seen: timestamp as u64,
+                start_time: timestamp as u64,
             });
         }
         Ok(())
@@ -213,12 +215,18 @@ impl SystemMonitor {
         
         // Update existing entry or create new one
         if let Some(entry) = usage_data.get_mut(&identifier) {
+            if !entry.status {
+                // App just became active, set start time
+                entry.start_time = current_time;
+            }
             entry.status = true;
             entry.last_seen = current_time;
         } else {
+            // New app, set both start time and last seen to current time
             usage_data.insert(identifier.clone(), ActiveEntry {
                 status: true,
                 last_seen: current_time,
+                start_time: current_time,
             });
         }
 
@@ -238,12 +246,12 @@ impl SystemMonitor {
         
         for (identifier, entry) in usage_data.iter() {
             if entry.status {
-                // Calculate duration since last update
+                // Calculate total duration since app became active
                 let current_time = SystemTime::now()
                     .duration_since(UNIX_EPOCH)
                     .unwrap()
                     .as_secs();
-                let duration = current_time.saturating_sub(entry.last_seen);
+                let duration = current_time.saturating_sub(entry.start_time);
                 
                 if duration > 0 {
                     tx.execute(
@@ -280,7 +288,8 @@ impl SystemMonitor {
 
         for (identifier, entry) in usage_data.iter() {
             if entry.status {
-                let duration = current_time.saturating_sub(entry.last_seen);
+                // Calculate total duration since app became active
+                let duration = current_time.saturating_sub(entry.start_time);
                 active_apps.push((identifier.clone(), duration));
                 
                 // Extract app info from identifier
