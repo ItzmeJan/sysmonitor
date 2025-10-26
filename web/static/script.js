@@ -100,26 +100,22 @@ class SystemMonitorDashboard {
             return;
         }
 
-        // Group activities by app name, but show individual titles
-        const groupedActivities = this.groupActivitiesByAppWithTitles(recentActivity);
+        // Group activities by app name + title/URL combination
+        const groupedActivities = this.groupActivitiesByAppAndTitle(recentActivity);
 
         container.innerHTML = groupedActivities.map(group => {
             const totalDuration = group.activities.reduce((sum, activity) => sum + activity.duration, 0);
             const latestActivity = group.activities[0]; // Most recent
             const timeAgo = this.formatTimeAgo(latestActivity.timestamp);
             
-            // Show individual titles for each session
-            const titleDetails = group.activities.map(activity => {
-                const title = activity.url || activity.window_title;
-                const duration = this.formatDuration(activity.duration);
-                return `${this.escapeHtml(title)} (${duration})`;
-            }).join('<br>');
+            // Show the title/URL
+            const title = latestActivity.url || latestActivity.window_title;
             
             return `
                 <div class="activity-entry">
                     <div class="activity-info">
                         <div class="activity-app">${this.escapeHtml(group.app_name)}</div>
-                        <div class="activity-details">${titleDetails}</div>
+                        <div class="activity-details">${this.escapeHtml(title)}</div>
                     </div>
                     <div class="activity-time">
                         <div class="duration">${this.formatDuration(totalDuration)}</div>
@@ -130,18 +126,21 @@ class SystemMonitorDashboard {
         }).join('');
     }
 
-    groupActivitiesByAppWithTitles(activities) {
+    groupActivitiesByAppAndTitle(activities) {
         const groups = new Map();
         
         activities.forEach(activity => {
-            const appName = activity.app_name;
-            if (!groups.has(appName)) {
-                groups.set(appName, {
-                    app_name: appName,
+            const title = activity.url || activity.window_title;
+            const groupKey = `${activity.app_name}|||${title}`; // Use separator to avoid conflicts
+            
+            if (!groups.has(groupKey)) {
+                groups.set(groupKey, {
+                    app_name: activity.app_name,
+                    title: title,
                     activities: []
                 });
             }
-            groups.get(appName).activities.push(activity);
+            groups.get(groupKey).activities.push(activity);
         });
 
         // Sort activities within each group by timestamp (most recent first)
