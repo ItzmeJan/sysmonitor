@@ -1,6 +1,6 @@
 class SystemMonitorDashboard {
     constructor() {
-        this.updateInterval = 2000; // Update every 2 seconds
+        this.updateInterval = 500; // Update every 500ms for faster debugging
         this.lastUpdateTime = null;
         this.init();
     }
@@ -13,18 +13,24 @@ class SystemMonitorDashboard {
 
     async loadDashboardData() {
         try {
+            // Show loading indicator
+            this.showLoadingIndicator();
+            
             const response = await fetch('/api/dashboard');
             const result = await response.json();
             
             if (result.success && result.data) {
                 this.updateDashboard(result.data);
+                this.hideLoadingIndicator();
             } else {
                 console.error('Failed to load dashboard data:', result.error);
                 this.showError('Failed to load dashboard data');
+                this.hideLoadingIndicator();
             }
         } catch (error) {
             console.error('Error fetching dashboard data:', error);
             this.showError('Connection error');
+            this.hideLoadingIndicator();
         }
     }
 
@@ -263,19 +269,24 @@ class SystemMonitorDashboard {
         }, this.updateInterval);
     }
 
-    showError(message) {
-        // Update status indicator
+    showLoadingIndicator() {
         const statusDot = document.querySelector('.status-dot');
         const statusText = document.getElementById('status-text');
         
-        statusDot.classList.remove('active');
-        statusText.textContent = message;
+        if (statusDot && statusText) {
+            statusDot.style.animation = 'pulse 0.5s infinite';
+            statusText.textContent = 'Updating...';
+        }
+    }
+
+    hideLoadingIndicator() {
+        const statusDot = document.querySelector('.status-dot');
+        const statusText = document.getElementById('status-text');
         
-        // Reset after 5 seconds
-        setTimeout(() => {
-            statusDot.classList.add('active');
+        if (statusDot && statusText) {
+            statusDot.style.animation = 'pulse 2s infinite';
             statusText.textContent = 'Monitoring Active';
-        }, 5000);
+        }
     }
 
     escapeHtml(text) {

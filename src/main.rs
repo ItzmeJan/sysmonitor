@@ -426,7 +426,7 @@ impl SystemMonitor {
 
     async fn run_monitoring(&self) {
         let mut last_flush = SystemTime::now();
-        let flush_interval = Duration::from_secs(30);
+        let flush_interval = Duration::from_secs(5); // Flush every 5 seconds for faster updates
         
         loop {
             if let Some((app_name, window_title, url)) = self.get_foreground_window_info() {
@@ -439,13 +439,13 @@ impl SystemMonitor {
                 self.update_usage(identifier, app_name, window_title, url);
             }
             
-            // Print status every 10 seconds
+            // Print status every 5 seconds for faster debugging
             let now = SystemTime::now();
-            if now.duration_since(last_flush).unwrap() >= Duration::from_secs(10) {
+            if now.duration_since(last_flush).unwrap() >= Duration::from_secs(5) {
                 self.print_status();
             }
             
-            // Flush to database every 30 seconds
+            // Flush to database every 5 seconds for faster updates
             if now.duration_since(last_flush).unwrap() >= flush_interval {
                 if let Err(e) = self.flush_to_database() {
                     eprintln!("Error flushing to database: {}", e);
@@ -455,7 +455,7 @@ impl SystemMonitor {
                 last_flush = now;
             }
             
-            tokio::time::sleep(Duration::from_secs(1)).await;
+            tokio::time::sleep(Duration::from_millis(500)).await;
         }
     }
 }
