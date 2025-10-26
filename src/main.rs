@@ -1,10 +1,6 @@
-use std::collections::HashMap;
-use std::ffi::OsString;
-use std::os::windows::ffi::OsStringExt;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
-use std::thread;
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
 
 use hashbrown::HashMap as FastHashMap;
@@ -12,10 +8,9 @@ use rusqlite::{params, Connection, Result as SqlResult};
 use serde::{Deserialize, Serialize};
 use warp::Filter;
 use windows::{
-    core::PCWSTR,
-    Win32::Foundation::{BOOL, HWND},
-    Win32::System::ProcessStatus::{GetProcessImageFileNameW, PROCESS_QUERY_INFORMATION},
-    Win32::System::Threading::{GetCurrentProcessId, OpenProcess},
+    Win32::Foundation::BOOL,
+    Win32::System::ProcessStatus::GetProcessImageFileNameW,
+    Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION},
     Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId},
 };
 
@@ -166,7 +161,7 @@ impl SystemMonitor {
         }
     }
 
-    fn extract_chromium_url(&self, app_name: &str, window_title: &str) -> Option<String> {
+    fn extract_chromium_url(&self, _app_name: &str, window_title: &str) -> Option<String> {
         // Try to extract URL from window title (common pattern: "Page Title - Browser Name")
         let title_parts: Vec<&str> = window_title.split(" - ").collect();
         if title_parts.len() >= 2 {
@@ -177,13 +172,13 @@ impl SystemMonitor {
         }
 
         // Try to read from Chrome's CurrentSession file
-        let user_profile = std::env::var("USERPROFILE").ok()?;
-        let session_path = if app_name.to_lowercase().contains("msedge") {
-            format!("{}\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Current Session", user_profile)
-        } else if app_name.to_lowercase().contains("brave") {
-            format!("{}\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Current Session", user_profile)
+        let _user_profile = std::env::var("USERPROFILE").ok()?;
+        let _session_path = if _app_name.to_lowercase().contains("msedge") {
+            format!("{}\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Current Session", _user_profile)
+        } else if _app_name.to_lowercase().contains("brave") {
+            format!("{}\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Current Session", _user_profile)
         } else {
-            format!("{}\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Current Session", user_profile)
+            format!("{}\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Current Session", _user_profile)
         };
 
         // This is a simplified approach - in practice, you'd need to parse the binary session file
@@ -208,7 +203,7 @@ impl SystemMonitor {
         None
     }
 
-    fn update_usage(&self, identifier: String, app_name: String, window_title: String, url: Option<String>) {
+    fn update_usage(&self, identifier: String, _app_name: String, _window_title: String, _url: Option<String>) {
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
             .unwrap()
@@ -236,7 +231,7 @@ impl SystemMonitor {
     }
 
     fn flush_to_database(&self) -> SqlResult<()> {
-        let conn = Connection::open(&self.db_path)?;
+        let mut conn = Connection::open(&self.db_path)?;
         let usage_data = self.usage_data.lock().unwrap();
         
         let tx = conn.transaction()?;
