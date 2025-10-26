@@ -58,7 +58,7 @@ class SystemMonitorDashboard {
         this.updateElement('active-count', data.active_apps.length);
 
         // Update active applications list
-        this.updateActiveAppsList(data.active_apps);
+        // this.updateActiveAppsList(data.active_apps); // Removed for compact UI
 
         // Update recent activity (using active apps as recent activity for now)
         this.updateRecentActivity(data.recent_activity);
@@ -73,30 +73,6 @@ class SystemMonitorDashboard {
         }
     }
 
-    updateActiveAppsList(activeApps) {
-        const container = document.getElementById('active-apps-list');
-        
-        if (activeApps.length === 0) {
-            container.innerHTML = '<div class="no-data">No active applications</div>';
-            return;
-        }
-
-        container.innerHTML = activeApps.map(app => {
-            const [identifier, duration] = app;
-            const [appName, ...rest] = identifier.split(':');
-            const details = rest.join(':');
-            
-            return `
-                <div class="app-item">
-                    <div class="app-name" title="${identifier}">
-                        <strong>${this.escapeHtml(appName)}</strong>
-                        ${details ? `<br><small>${this.escapeHtml(details)}</small>` : ''}
-                    </div>
-                    <div class="app-duration">${this.formatDuration(duration)}</div>
-                </div>
-            `;
-        }).join('');
-    }
 
     updateRecentActivity(recentActivity) {
         const container = document.getElementById('recent-activity-list');

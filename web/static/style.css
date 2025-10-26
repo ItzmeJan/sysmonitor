@@ -38,27 +38,34 @@
     box-sizing: border-box;
 }
 
+html {
+    overflow-x: hidden;
+}
+
 body {
     font-family: 'Segoe UI', Tahoma, Geneva, Verdana, sans-serif;
     background: var(--bg-primary);
     min-height: 100vh;
     color: var(--text-primary);
     transition: background 0.3s ease, color 0.3s ease;
+    overflow: hidden;
 }
 
 .container {
-    max-width: 1200px;
+    max-width: 750px;
+    width: 100%;
     margin: 0 auto;
-    padding: 20px;
+    padding: 10px;
+    box-sizing: border-box;
 }
 
 /* Header */
 .header {
     background: var(--bg-secondary);
     backdrop-filter: blur(10px);
-    border-radius: 15px;
-    padding: 20px 30px;
-    margin-bottom: 30px;
+    border-radius: 10px;
+    padding: 12px 15px;
+    margin-bottom: 15px;
     display: flex;
     justify-content: space-between;
     align-items: center;
@@ -68,7 +75,7 @@ body {
 
 .header h1 {
     color: var(--text-secondary);
-    font-size: 2rem;
+    font-size: 1.5rem;
     font-weight: 600;
     transition: color 0.3s ease;
 }
@@ -112,9 +119,9 @@ body {
 /* Dashboard Grid */
 .dashboard-grid {
     display: grid;
-    grid-template-columns: repeat(auto-fit, minmax(300px, 1fr));
-    gap: 20px;
-    margin-bottom: 30px;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+    margin-bottom: 15px;
 }
 
 /* Cards */
@@ -151,7 +158,7 @@ body {
 }
 
 .card-content {
-    padding: 20px;
+    padding: 12px;
     flex: 1;
     display: flex;
     flex-direction: column;
@@ -253,9 +260,14 @@ body {
     transition: background 0.3s ease;
 }
 
+/* Recent Activity - Full Width */
+.recent-activity {
+    grid-column: 1 / -1;
+}
+
 /* Activity List */
 .activity-list {
-    max-height: 400px;
+    max-height: 200px;
     overflow-y: auto;
     overflow-x: hidden;
     position: relative;
@@ -318,9 +330,9 @@ body {
 
 /* Browser Group Styling */
 .browser-group {
-    margin-bottom: 15px;
+    margin-bottom: 8px;
     border: 1px solid var(--border-color);
-    border-radius: 8px;
+    border-radius: 6px;
     overflow: hidden;
     transition: border-color 0.3s ease;
     position: relative;
@@ -330,7 +342,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 12px 15px;
+    padding: 8px 12px;
     background: var(--bg-secondary);
     border-bottom: 1px solid var(--border-color);
 }
@@ -378,7 +390,7 @@ body {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    padding: 8px 20px;
+    padding: 6px 15px;
     border-bottom: 1px solid var(--border-color);
     transition: background 0.2s ease;
 }
@@ -482,4 +494,34 @@ body {
 .apps-list::-webkit-scrollbar-thumb:hover,
 .activity-list::-webkit-scrollbar-thumb:hover {
     background: #a8a8a8;
+}
+
+/* Small PWA Window Optimizations */
+@media (max-width: 600px) {
+    .container {
+        padding: 8px;
+    }
+    
+    .header {
+        padding: 10px 12px;
+        margin-bottom: 15px;
+    }
+    
+    .header h1 {
+        font-size: 1.2rem;
+    }
+    
+    .card-content {
+        padding: 12px;
+    }
+    
+    .activity-list {
+        max-height: 200px;
+    }
+}
+
+/* Prevent horizontal overflow */
+* {
+    max-width: 100%;
+    word-wrap: break-word;
 }
