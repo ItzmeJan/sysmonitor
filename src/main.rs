@@ -1,0 +1,493 @@
+use std::collections::HashMap;
+use std::ffi::OsString;
+use std::os::windows::ffi::OsStringExt;
+use std::path::Path;
+use std::process::Command;
+use std::sync::{Arc, Mutex};
+use std::thread;
+use std::time::{Duration, SystemTime, UNIX_EPOCH};
+
+use hashbrown::HashMap as FastHashMap;
+use rusqlite::{params, Connection, Result as SqlResult};
+use serde::{Deserialize, Serialize};
+use warp::Filter;
+use windows::{
+    core::PCWSTR,
+    Win32::Foundation::{BOOL, HWND},
+    Win32::System::ProcessStatus::{GetProcessImageFileNameW, PROCESS_QUERY_INFORMATION},
+    Win32::System::Threading::{GetCurrentProcessId, OpenProcess},
+    Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId},
+};
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct UsageEntry {
+    identifier: String,
+    app_name: String,
+    window_title: String,
+    url: Option<String>,
+    last_seen: u64,
+    total_time: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ActiveEntry {
+    status: bool,
+    last_seen: u64,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct ApiResponse {
+    success: bool,
+    data: Option<serde_json::Value>,
+    error: Option<String>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize)]
+struct DashboardData {
+    current_app: Option<String>,
+    current_window: Option<String>,
+    current_url: Option<String>,
+    active_apps: Vec<(String, u64)>,
+    total_apps: usize,
+    uptime: u64,
+}
+
+struct SystemMonitor {
+    usage_data: Arc<Mutex<FastHashMap<String, ActiveEntry>>>,
+    db_path: String,
+    start_time: u64,
+}
+
+impl SystemMonitor {
+    fn new() -> Self {
+        Self {
+            usage_data: Arc::new(Mutex::new(FastHashMap::new())),
+            db_path: "usage.db".to_string(),
+            start_time: SystemTime::now()
+                .duration_since(UNIX_EPOCH)
+                .unwrap()
+                .as_secs(),
+        }
+    }
+
+    fn init_database(&self) -> SqlResult<()> {
+        let conn = Connection::open(&self.db_path)?;
+        conn.execute(
+            "CREATE TABLE IF NOT EXISTS usage_logs (
+                id INTEGER PRIMARY KEY AUTOINCREMENT,
+                identifier TEXT NOT NULL,
+                app_name TEXT NOT NULL,
+                window_title TEXT NOT NULL,
+                url TEXT,
+                timestamp INTEGER NOT NULL,
+                duration INTEGER NOT NULL DEFAULT 0
+            )",
+            [],
+        )?;
+        Ok(())
+    }
+
+    fn load_existing_data(&self) -> SqlResult<()> {
+        let conn = Connection::open(&self.db_path)?;
+        let mut stmt = conn.prepare("SELECT identifier, timestamp FROM usage_logs ORDER BY timestamp DESC")?;
+        let rows = stmt.query_map([], |row| {
+            Ok((row.get::<_, String>(0)?, row.get::<_, i64>(1)?))
+        })?;
+
+        let mut usage_data = self.usage_data.lock().unwrap();
+        for row in rows {
+            let (identifier, timestamp) = row?;
+            usage_data.insert(identifier, ActiveEntry {
+                status: false,
+                last_seen: timestamp as u64,
+            });
+        }
+        Ok(())
+    }
+
+    fn get_foreground_window_info(&self) -> Option<(String, String, Option<String>)> {
+        unsafe {
+            let hwnd = GetForegroundWindow();
+            if hwnd.0 == 0 {
+                return None;
+            }
+
+            // Get window title
+            let mut title_buffer = [0u16; 256];
+            let title_len = GetWindowTextW(hwnd, &mut title_buffer);
+            let window_title = if title_len > 0 {
+                String::from_utf16_lossy(&title_buffer[..title_len as usize])
+            } else {
+                "Unknown".to_string()
+            };
+
+            // Get process ID
+            let mut process_id = 0u32;
+            GetWindowThreadProcessId(hwnd, Some(&mut process_id));
+            if process_id == 0 {
+                return None;
+            }
+
+            // Get process handle
+            let process_handle = OpenProcess(PROCESS_QUERY_INFORMATION, BOOL(0), process_id).ok()?;
+            
+            // Get process image name
+            let mut image_buffer = [0u16; 260];
+            let image_len = GetProcessImageFileNameW(process_handle, &mut image_buffer);
+            let process_path = if image_len > 0 {
+                String::from_utf16_lossy(&image_buffer[..image_len as usize])
+            } else {
+                return None;
+            };
+
+            // Extract executable name
+            let app_name = Path::new(&process_path)
+                .file_name()
+                .and_then(|name| name.to_str())
+                .unwrap_or("Unknown")
+                .to_string();
+
+            // Detect browser and extract URL
+            let url = self.extract_browser_url(&app_name, &window_title);
+
+            Some((app_name, window_title, url))
+        }
+    }
+
+    fn extract_browser_url(&self, app_name: &str, window_title: &str) -> Option<String> {
+        let app_lower = app_name.to_lowercase();
+        
+        if app_lower.contains("chrome") || app_lower.contains("msedge") || app_lower.contains("brave") {
+            self.extract_chromium_url(app_name, window_title)
+        } else if app_lower.contains("firefox") {
+            self.extract_firefox_url(window_title)
+        } else {
+            None
+        }
+    }
+
+    fn extract_chromium_url(&self, app_name: &str, window_title: &str) -> Option<String> {
+        // Try to extract URL from window title (common pattern: "Page Title - Browser Name")
+        let title_parts: Vec<&str> = window_title.split(" - ").collect();
+        if title_parts.len() >= 2 {
+            let potential_url = title_parts.last().unwrap();
+            if potential_url.starts_with("http") || potential_url.contains("://") {
+                return Some(potential_url.to_string());
+            }
+        }
+
+        // Try to read from Chrome's CurrentSession file
+        let user_profile = std::env::var("USERPROFILE").ok()?;
+        let session_path = if app_name.to_lowercase().contains("msedge") {
+            format!("{}\\AppData\\Local\\Microsoft\\Edge\\User Data\\Default\\Current Session", user_profile)
+        } else if app_name.to_lowercase().contains("brave") {
+            format!("{}\\AppData\\Local\\BraveSoftware\\Brave-Browser\\User Data\\Default\\Current Session", user_profile)
+        } else {
+            format!("{}\\AppData\\Local\\Google\\Chrome\\User Data\\Default\\Current Session", user_profile)
+        };
+
+        // This is a simplified approach - in practice, you'd need to parse the binary session file
+        // For now, we'll use window title heuristics
+        None
+    }
+
+    fn extract_firefox_url(&self, window_title: &str) -> Option<String> {
+        // Firefox often includes the URL in the window title
+        // Pattern: "Page Title - Mozilla Firefox" or "Page Title | Mozilla Firefox"
+        let patterns = [" - Mozilla Firefox", " | Mozilla Firefox", " — Mozilla Firefox"];
+        
+        for pattern in &patterns {
+            if let Some(pos) = window_title.find(pattern) {
+                let title_part = &window_title[..pos];
+                if title_part.starts_with("http") || title_part.contains("://") {
+                    return Some(title_part.to_string());
+                }
+            }
+        }
+        
+        None
+    }
+
+    fn update_usage(&self, identifier: String, app_name: String, window_title: String, url: Option<String>) {
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut usage_data = self.usage_data.lock().unwrap();
+        
+        // Update existing entry or create new one
+        if let Some(entry) = usage_data.get_mut(&identifier) {
+            entry.status = true;
+            entry.last_seen = current_time;
+        } else {
+            usage_data.insert(identifier.clone(), ActiveEntry {
+                status: true,
+                last_seen: current_time,
+            });
+        }
+
+        // Mark all other entries as inactive
+        for (key, entry) in usage_data.iter_mut() {
+            if *key != identifier {
+                entry.status = false;
+            }
+        }
+    }
+
+    fn flush_to_database(&self) -> SqlResult<()> {
+        let conn = Connection::open(&self.db_path)?;
+        let usage_data = self.usage_data.lock().unwrap();
+        
+        let tx = conn.transaction()?;
+        
+        for (identifier, entry) in usage_data.iter() {
+            if entry.status {
+                // Calculate duration since last update
+                let current_time = SystemTime::now()
+                    .duration_since(UNIX_EPOCH)
+                    .unwrap()
+                    .as_secs();
+                let duration = current_time.saturating_sub(entry.last_seen);
+                
+                if duration > 0 {
+                    tx.execute(
+                        "INSERT INTO usage_logs (identifier, app_name, window_title, url, timestamp, duration) 
+                         VALUES (?1, ?2, ?3, ?4, ?5, ?6)",
+                        params![
+                            identifier,
+                            "Unknown", // We'll need to store this separately
+                            "Unknown", // We'll need to store this separately
+                            "",
+                            current_time,
+                            duration
+                        ],
+                    )?;
+                }
+            }
+        }
+        
+        tx.commit()?;
+        Ok(())
+    }
+
+    fn get_dashboard_data(&self) -> DashboardData {
+        let usage_data = self.usage_data.lock().unwrap();
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        let mut current_app = None;
+        let mut current_window = None;
+        let mut current_url = None;
+        let mut active_apps = Vec::new();
+
+        for (identifier, entry) in usage_data.iter() {
+            if entry.status {
+                let duration = current_time.saturating_sub(entry.last_seen);
+                active_apps.push((identifier.clone(), duration));
+                
+                // Extract app info from identifier
+                if let Some((app, rest)) = identifier.split_once(':') {
+                    current_app = Some(app.to_string());
+                    if rest.starts_with("http") {
+                        current_url = Some(rest.to_string());
+                    } else {
+                        current_window = Some(rest.to_string());
+                    }
+                }
+            }
+        }
+
+        // Sort by duration (most recent first)
+        active_apps.sort_by(|a, b| b.1.cmp(&a.1));
+
+        DashboardData {
+            current_app,
+            current_window,
+            current_url,
+            active_apps,
+            total_apps: usage_data.len(),
+            uptime: current_time - self.start_time,
+        }
+    }
+
+    fn print_status(&self) {
+        let dashboard_data = self.get_dashboard_data();
+        let current_time = SystemTime::now()
+            .duration_since(UNIX_EPOCH)
+            .unwrap()
+            .as_secs();
+
+        println!("\n=== System Monitor Status ===");
+        println!("Timestamp: {}", current_time);
+        println!("Uptime: {} seconds", dashboard_data.uptime);
+        
+        if let Some(ref app) = dashboard_data.current_app {
+            println!("Current App: {}", app);
+        }
+        if let Some(ref window) = dashboard_data.current_window {
+            println!("Window: {}", window);
+        }
+        if let Some(ref url) = dashboard_data.current_url {
+            println!("URL: {}", url);
+        }
+        
+        println!("Active Applications:");
+        for (identifier, duration) in &dashboard_data.active_apps {
+            println!("  ✓ {} (active for {}s)", identifier, duration);
+        }
+        
+        println!("Total tracked applications: {}", dashboard_data.total_apps);
+    }
+
+    async fn run_monitoring(&self) {
+        let mut last_flush = SystemTime::now();
+        let flush_interval = Duration::from_secs(30);
+        
+        loop {
+            if let Some((app_name, window_title, url)) = self.get_foreground_window_info() {
+                let identifier = if let Some(ref url) = url {
+                    format!("{}:{}", app_name, url)
+                } else {
+                    format!("{}:{}", app_name, window_title)
+                };
+                
+                self.update_usage(identifier, app_name, window_title, url);
+            }
+            
+            // Print status every 10 seconds
+            let now = SystemTime::now();
+            if now.duration_since(last_flush).unwrap() >= Duration::from_secs(10) {
+                self.print_status();
+            }
+            
+            // Flush to database every 30 seconds
+            if now.duration_since(last_flush).unwrap() >= flush_interval {
+                if let Err(e) = self.flush_to_database() {
+                    eprintln!("Error flushing to database: {}", e);
+                } else {
+                    println!("Data flushed to database");
+                }
+                last_flush = now;
+            }
+            
+            tokio::time::sleep(Duration::from_secs(1)).await;
+        }
+    }
+}
+
+fn launch_edge_app() -> Result<(), Box<dyn std::error::Error>> {
+    let url = "http://localhost:3030";
+    let edge_path = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
+    
+    Command::new(edge_path)
+        .args(&[
+            "--app",
+            &url,
+            "--new-window",
+            "--disable-web-security",
+            "--disable-features=VizDisplayCompositor"
+        ])
+        .spawn()?;
+    
+    println!("Launched Edge app window at {}", url);
+    Ok(())
+}
+
+#[tokio::main]
+async fn main() -> Result<(), Box<dyn std::error::Error>> {
+    println!("System Monitor v0.1.0 with Web GUI");
+    println!("Starting web server and monitoring...");
+    
+    let monitor = Arc::new(SystemMonitor::new());
+    
+    // Initialize database
+    monitor.init_database()?;
+    monitor.load_existing_data()?;
+    
+    println!("Database initialized. Starting web server on http://localhost:3030");
+    
+    // Clone monitor for web server
+    let monitor_clone = monitor.clone();
+    
+    // Start monitoring in background
+    let monitor_task = tokio::spawn(async move {
+        monitor_clone.run_monitoring().await;
+    });
+    
+    // Start web server
+    let web_server_task = tokio::spawn(async move {
+        start_web_server(monitor).await;
+    });
+    
+    // Launch Edge app window
+    tokio::task::spawn_blocking(|| {
+        std::thread::sleep(Duration::from_secs(2)); // Wait for server to start
+        if let Err(e) = launch_edge_app() {
+            eprintln!("Failed to launch Edge app: {}", e);
+            println!("You can manually open http://localhost:3030 in your browser");
+        }
+    });
+    
+    // Wait for both tasks
+    tokio::try_join!(monitor_task, web_server_task)?;
+    
+    Ok(())
+}
+
+async fn start_web_server(monitor: Arc<SystemMonitor>) {
+    let monitor_filter = warp::any().map(move || monitor.clone());
+    
+    // Serve static files
+    let static_files = warp::path("static")
+        .and(warp::fs::dir("web/static"));
+    
+    // API routes
+    let api_routes = warp::path("api")
+        .and(
+            // Dashboard data endpoint
+            warp::path("dashboard")
+                .and(warp::get())
+                .and(monitor_filter.clone())
+                .and_then(handle_dashboard)
+                .or(
+                    // Health check endpoint
+                    warp::path("health")
+                        .and(warp::get())
+                        .and_then(handle_health)
+                )
+        );
+    
+    // Serve main HTML page
+    let index = warp::path::end()
+        .and(warp::get())
+        .and(warp::fs::file("web/index.html"));
+    
+    let routes = index
+        .or(static_files)
+        .or(api_routes);
+    
+    println!("Web server starting on http://localhost:3030");
+    warp::serve(routes)
+        .run(([127, 0, 0, 1], 3030))
+        .await;
+}
+
+async fn handle_dashboard(monitor: Arc<SystemMonitor>) -> Result<impl warp::Reply, warp::Rejection> {
+    let data = monitor.get_dashboard_data();
+    Ok(warp::reply::json(&ApiResponse {
+        success: true,
+        data: Some(serde_json::to_value(data).unwrap()),
+        error: None,
+    }))
+}
+
+async fn handle_health() -> Result<impl warp::Reply, warp::Rejection> {
+    Ok(warp::reply::json(&ApiResponse {
+        success: true,
+        data: Some(serde_json::json!({"status": "healthy"})),
+        error: None,
+    }))
+}

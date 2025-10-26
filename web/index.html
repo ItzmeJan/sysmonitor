@@ -1,0 +1,108 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>System Monitor Dashboard</title>
+    <link rel="stylesheet" href="/static/style.css">
+    <link href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.0.0/css/all.min.css" rel="stylesheet">
+    <script>
+        // Auto-detect system theme preference
+        function detectTheme() {
+            const prefersDark = window.matchMedia('(prefers-color-scheme: dark)').matches;
+            document.documentElement.setAttribute('data-theme', prefersDark ? 'dark' : 'light');
+        }
+        
+        // Detect theme on load
+        document.addEventListener('DOMContentLoaded', detectTheme);
+        
+        // Listen for theme changes
+        window.matchMedia('(prefers-color-scheme: dark)').addEventListener('change', detectTheme);
+    </script>
+</head>
+<body>
+    <div class="container">
+        <header class="header">
+            <h1><i class="fas fa-desktop"></i> System Monitor</h1>
+            <div class="status-indicator">
+                <span class="status-dot active"></span>
+                <span id="status-text">Monitoring Active</span>
+            </div>
+        </header>
+
+        <div class="dashboard-grid">
+            <!-- Current Activity Card -->
+            <div class="card current-activity">
+                <div class="card-header">
+                    <h2><i class="fas fa-play-circle"></i> Current Activity</h2>
+                </div>
+                <div class="card-content">
+                    <div class="activity-item">
+                        <label>Application:</label>
+                        <span id="current-app">-</span>
+                    </div>
+                    <div class="activity-item">
+                        <label>Window:</label>
+                        <span id="current-window">-</span>
+                    </div>
+                    <div class="activity-item" id="url-item" style="display: none;">
+                        <label>URL:</label>
+                        <span id="current-url">-</span>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Statistics Card -->
+            <div class="card statistics">
+                <div class="card-header">
+                    <h2><i class="fas fa-chart-bar"></i> Statistics</h2>
+                </div>
+                <div class="card-content">
+                    <div class="stat-item">
+                        <div class="stat-value" id="uptime">0s</div>
+                        <div class="stat-label">Uptime</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="total-apps">0</div>
+                        <div class="stat-label">Tracked Apps</div>
+                    </div>
+                    <div class="stat-item">
+                        <div class="stat-value" id="active-count">0</div>
+                        <div class="stat-label">Active Now</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Active Applications Card -->
+            <div class="card active-apps">
+                <div class="card-header">
+                    <h2><i class="fas fa-list"></i> Active Applications</h2>
+                </div>
+                <div class="card-content">
+                    <div id="active-apps-list" class="apps-list">
+                        <div class="no-data">No active applications</div>
+                    </div>
+                </div>
+            </div>
+
+            <!-- Recent Activity Card -->
+            <div class="card recent-activity">
+                <div class="card-header">
+                    <h2><i class="fas fa-history"></i> Recent Activity</h2>
+                </div>
+                <div class="card-content">
+                    <div id="recent-activity-list" class="activity-list">
+                        <div class="no-data">No recent activity</div>
+                    </div>
+                </div>
+            </div>
+        </div>
+
+        <footer class="footer">
+            <p>System Monitor v0.1.0 | Last updated: <span id="last-updated">-</span></p>
+        </footer>
+    </div>
+
+    <script src="/static/script.js"></script>
+</body>
+</html>
