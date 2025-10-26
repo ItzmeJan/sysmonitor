@@ -9,9 +9,9 @@ use serde::{Deserialize, Serialize};
 use warp::Filter;
 use windows::{
     Win32::Foundation::BOOL,
-    Win32::System::ProcessStatus::GetProcessImageFileNameW,
-    Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION},
-    Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId},
+    Win32::System::ProcessStatus::{GetProcessImageFileNameW, EnumProcesses},
+    Win32::System::Threading::{OpenProcess, PROCESS_QUERY_INFORMATION, PROCESS_VM_READ},
+    Win32::UI::WindowsAndMessaging::{GetForegroundWindow, GetWindowTextW, GetWindowThreadProcessId, EnumWindows, IsWindowVisible, GetWindow},
 };
 
 // Configuration constants
@@ -217,6 +217,91 @@ impl SystemMonitor {
             }
         }
         
+        None
+    }
+
+    fn get_all_running_apps(&self) -> Vec<(String, String, Option<String>)> {
+        let mut apps = Vec::new();
+        let mut process_ids = [0u32; 1024];
+        let mut bytes_returned = 0u32;
+
+        unsafe {
+            if EnumProcesses(&mut process_ids, &mut bytes_returned).is_ok() {
+                let process_count = bytes_returned as usize / std::mem::size_of::<u32>();
+                
+                for i in 0..process_count {
+                    let process_id = process_ids[i];
+                    if process_id == 0 {
+                        continue;
+                    }
+
+                    // Get process handle
+                    if let Ok(process_handle) = OpenProcess(PROCESS_QUERY_INFORMATION | PROCESS_VM_READ, BOOL(0), process_id) {
+                        // Get process image name
+                        let mut image_buffer = [0u16; 260];
+                        let image_len = GetProcessImageFileNameW(process_handle, &mut image_buffer);
+                        
+                        if image_len > 0 {
+                            let process_path = String::from_utf16_lossy(&image_buffer[..image_len as usize]);
+                            let app_name = Path::new(&process_path)
+                                .file_name()
+                                .and_then(|name| name.to_str())
+                                .unwrap_or("Unknown")
+                                .to_string();
+
+                            // Get windows for this process
+                            let windows = self.get_process_windows(process_id);
+                            
+                            for (window_title, url) in windows {
+                                apps.push((app_name.clone(), window_title, url));
+                            }
+                        }
+                    }
+                }
+            }
+        }
+
+        apps
+    }
+
+    fn get_process_windows(&self, process_id: u32) -> Vec<(String, Option<String>)> {
+        let mut windows = Vec::new();
+        let mut window_data = vec![(process_id, Vec::new())];
+        
+        unsafe {
+            EnumWindows(Some(enum_windows_proc), &mut window_data as *mut _ as isize);
+        }
+
+        if let Some((_, window_list)) = window_data.first() {
+            for &hwnd in window_list {
+                if IsWindowVisible(hwnd) {
+                    let mut title_buffer = [0u16; 256];
+                    let title_len = GetWindowTextW(hwnd, &mut title_buffer);
+                    
+                    if title_len > 0 {
+                        let window_title = String::from_utf16_lossy(&title_buffer[..title_len as usize]);
+                        if !window_title.is_empty() {
+                            // Check if this is a browser and extract URL
+                            let url = self.extract_browser_url_from_title(&window_title);
+                            windows.push((window_title, url));
+                        }
+                    }
+                }
+            }
+        }
+
+        windows
+    }
+
+    fn extract_browser_url_from_title(&self, window_title: &str) -> Option<String> {
+        // Simple heuristic: if title contains "http" or common domain patterns
+        if window_title.contains("http") || 
+           window_title.contains("www.") ||
+           window_title.contains(".com") ||
+           window_title.contains(".org") ||
+           window_title.contains(".net") {
+            return Some(window_title.to_string());
+        }
         None
     }
 
