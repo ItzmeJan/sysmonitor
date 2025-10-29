@@ -1,0 +1,1 @@
+start msedge --app=http://localhost:3030 --window-size=800,600 --hide-scrollbar
