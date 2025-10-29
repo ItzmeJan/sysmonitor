@@ -1,7 +1,9 @@
+use std::env;
 use std::path::Path;
 use std::process::Command;
 use std::sync::{Arc, Mutex};
 use std::time::{Duration, SystemTime, UNIX_EPOCH};
+use std::net::{TcpListener, SocketAddr};
 
 use hashbrown::HashMap as FastHashMap;
 use rusqlite::{params, Connection, Result as SqlResult};
@@ -67,10 +69,11 @@ struct SystemMonitor {
     usage_data: Arc<Mutex<FastHashMap<String, ActiveEntry>>>,
     db_path: String,
     start_time: u64,
+    debug_mode: bool,
 }
 
 impl SystemMonitor {
-    fn new() -> Self {
+    fn new(debug_mode: bool) -> Self {
         Self {
             usage_data: Arc::new(Mutex::new(FastHashMap::new())),
             db_path: "usage.db".to_string(),
@@ -78,6 +81,7 @@ impl SystemMonitor {
                 .duration_since(UNIX_EPOCH)
                 .unwrap()
                 .as_secs(),
+            debug_mode,
         }
     }
 
@@ -396,6 +400,10 @@ impl SystemMonitor {
     }
 
     fn print_status(&self) {
+        if !self.debug_mode {
+            return;
+        }
+        
         let dashboard_data = self.get_dashboard_data();
         let current_time = SystemTime::now()
             .duration_since(UNIX_EPOCH)
@@ -439,7 +447,7 @@ impl SystemMonitor {
                 self.update_usage(identifier, app_name, window_title, url);
             }
             
-            // Print status every 5 seconds for faster debugging
+            // Print status every 5 seconds for faster debugging (only in debug mode)
             let now = SystemTime::now();
             if now.duration_since(last_flush).unwrap() >= Duration::from_secs(5) {
                 self.print_status();
@@ -448,8 +456,10 @@ impl SystemMonitor {
             // Flush to database every 5 seconds for faster updates
             if now.duration_since(last_flush).unwrap() >= flush_interval {
                 if let Err(e) = self.flush_to_database() {
-                    eprintln!("Error flushing to database: {}", e);
-                } else {
+                    if self.debug_mode {
+                        eprintln!("Error flushing to database: {}", e);
+                    }
+                } else if self.debug_mode {
                     println!("Data flushed to database");
                 }
                 last_flush = now;
@@ -460,36 +470,57 @@ impl SystemMonitor {
     }
 }
 
+fn is_port_in_use(port: u16) -> bool {
+    TcpListener::bind(SocketAddr::from(([127, 0, 0, 1], port))).is_err()
+}
+
 fn launch_edge_app() -> Result<(), Box<dyn std::error::Error>> {
     let url = "http://localhost:3030";
     let edge_path = r"C:\Program Files (x86)\Microsoft\Edge\Application\msedge.exe";
     
     Command::new(edge_path)
         .args(&[
-            "--app",
-            &url,
-            "--window-size=800,600",
-            "--disable-web-security",
-            "--disable-features=VizDisplayCompositor"
+            "--app=".to_owned()+url,
+            //&url,
+            "--window-size=800,600".to_string(),
+            "--hide-scrollbar".to_string()
         ])
         .spawn()?;
     
-    println!("Launched Edge app window at {} (800x600)", url);
     Ok(())
 }
 
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn std::error::Error>> {
-    println!("System Monitor v0.1.0 with Web GUI");
-    println!("Starting web server and monitoring...");
+    // Check for debug mode
+    let debug_mode = env::args().any(|arg| arg == "--debug");
     
-    let monitor = Arc::new(SystemMonitor::new());
+    if debug_mode {
+        println!("System Monitor v0.1.0 with Web GUI (DEBUG MODE)");
+        println!("Starting web server and monitoring...");
+    }
+    
+    let monitor = Arc::new(SystemMonitor::new(debug_mode));
     
     // Initialize database
     monitor.init_database()?;
     monitor.load_existing_data()?;
     
-    println!("Database initialized. Starting web server on http://localhost:3030");
+    if debug_mode {
+        println!("Database initialized. Starting web server on http://localhost:3030");
+    }
+    
+    // Check if port is already in use
+    let port_in_use = is_port_in_use(3030);
+    
+    if port_in_use {
+        // Port is in use, just launch Edge
+        if debug_mode {
+            println!("Port 3030 is already in use. Launching Edge app...");
+        }
+        launch_edge_app()?;
+        return Ok(());
+    }
     
     // Clone monitor for web server
     let monitor_clone = monitor.clone();
@@ -504,12 +535,14 @@ async fn main() -> Result<(), Box<dyn std::error::Error>> {
         start_web_server(monitor).await;
     });
     
-    // Launch Edge app window
-    tokio::task::spawn_blocking(|| {
+    // Launch Edge app window after server starts
+    tokio::task::spawn_blocking(move || {
         std::thread::sleep(Duration::from_secs(2)); // Wait for server to start
-        if let Err(e) = launch_edge_app() {
-            eprintln!("Failed to launch Edge app: {}", e);
-            println!("You can manually open http://localhost:3030 in your browser");
+        if let Err(_) = launch_edge_app() {
+            if debug_mode {
+                eprintln!("Failed to launch Edge app");
+                println!("You can manually open http://localhost:3030 in your browser");
+            }
         }
     });
     
@@ -551,7 +584,6 @@ async fn start_web_server(monitor: Arc<SystemMonitor>) {
         .or(static_files)
         .or(api_routes);
     
-    println!("Web server starting on http://localhost:3030");
     warp::serve(routes)
         .run(([127, 0, 0, 1], 3030))
         .await;
